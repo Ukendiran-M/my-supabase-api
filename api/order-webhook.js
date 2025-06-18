@@ -1,84 +1,69 @@
-import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-);
-
-const SHOPIFY_WEBHOOK_SECRET = process.env.SHOPIFY_WEBHOOK_SECRET;
+import { buffer } from 'micro';
+import { createClient } from '@supabase/supabase-js';
 
 export const config = {
   api: {
-    bodyParser: false, // We need raw body for HMAC verification
+    bodyParser: false, // Required to verify raw body
   },
 };
 
-const getRawBody = (req) =>
-  new Promise((resolve, reject) => {
-    let data = '';
-    req.on('data', chunk => data += chunk);
-    req.on('end', () => resolve(data));
-    req.on('error', err => reject(err));
-  });
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 export default async function handler(req, res) {
-  try {
-    const rawBody = await getRawBody(req);
-    const hmac = req.headers['x-shopify-hmac-sha256'];
-    const generatedHash = crypto
-      .createHmac('sha256', SHOPIFY_WEBHOOK_SECRET)
-      .update(rawBody, 'utf8')
-      .digest('base64');
+  if (req.method !== 'POST') return res.status(405).end();
 
-    if (hmac !== generatedHash) {
-      return res.status(401).json({ status: 'unauthorized' });
-    }
+  const rawBody = await buffer(req);
+  const hmacHeader = req.headers['x-shopify-hmac-sha256'];
+  const secret = process.env.SHOPIFY_WEBHOOK_SECRET;
 
-    const order = JSON.parse(rawBody);
-    const email = order.email?.toLowerCase();
-    const ip = order.client_details?.browser_ip;
-    const userAgent = order.client_details?.user_agent;
+  // Verify HMAC
+  const hash = crypto
+    .createHmac('sha256', secret)
+    .update(rawBody)
+    .digest('base64');
 
-    const isFreeProduct = order.line_items.some(item =>
-      item.title.toLowerCase().includes('free')
-    );
-
-    if (!email || !isFreeProduct) {
-      return res.status(200).json({ status: 'skipped' });
-    }
-
-    // Avoid duplicate entry
-    const { data: existing, error: fetchError } = await supabase
-      .from('claimed_subscriptions')
-      .select('id')
-      .eq('email', email);
-
-    if (fetchError) {
-      return res.status(500).json({ status: 'error', error: fetchError.message });
-    }
-
-    if (existing && existing.length > 0) {
-      return res.status(200).json({ status: 'duplicate_skipped' });
-    }
-
-    const { error: insertError } = await supabase.from('claimed_subscriptions').insert([
-      {
-        email,
-        fingerprint: null,
-        ip_address: ip || 'unknown',
-        user_agent: userAgent || 'unknown',
-        claimed_at: new Date()
-      }
-    ]);
-
-    if (insertError) {
-      return res.status(500).json({ status: 'insert_error', error: insertError.message });
-    }
-
-    return res.status(200).json({ status: 'recorded' });
-
-  } catch (err) {
-    return res.status(500).json({ status: 'crash', error: err.message });
+  if (hash !== hmacHeader) {
+    console.log("HMAC verification failed");
+    return res.status(401).json({ error: 'Unauthorized - HMAC mismatch' });
   }
+
+  const order = JSON.parse(rawBody.toString('utf8'));
+
+  const isFree = order.line_items.some(item =>
+    item.title.toLowerCase().includes('free')
+  );
+
+  if (!isFree) {
+    return res.status(200).json({ status: 'not_free' });
+  }
+
+  const email = order.email;
+  const ip = order.customer?.default_address?.ip || 'unknown';
+  const userAgent = req.headers['user-agent'];
+
+  const { data: existing } = await supabase
+    .from('claimed_subscriptions')
+    .select('id')
+    .eq('email', email);
+
+  if (existing && existing.length > 0) {
+    return res.status(200).json({ status: 'already_claimed' });
+  }
+
+  const { error: insertError } = await supabase.from('claimed_subscriptions').insert([
+    {
+      email,
+      fingerprint: 'via-webhook',
+      ip_address: ip,
+      user_agent: userAgent,
+      claimed_at: new Date(),
+    },
+  ]);
+
+  if (insertError) {
+    return res.status(500).json({ error: insertError.message });
+  }
+
+  return res.status(200).json({ status: 'claimed' });
 }
