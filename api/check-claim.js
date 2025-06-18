@@ -1,6 +1,5 @@
-// /api/check-claim.js
-
 import { createClient } from '@supabase/supabase-js';
+import cors from '../lib/cors'; // 👈 Go up one directory
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -8,18 +7,10 @@ const supabase = createClient(
 );
 
 export default async function handler(req, res) {
-  // ✅ CORS Headers
-  res.setHeader("Access-Control-Allow-Credentials", "true");
-  res.setHeader("Access-Control-Allow-Origin", "https://puerhcraft.com"); // Only allow your domain
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  await cors(req, res); // ✅ Handle CORS
 
-  // ✅ Handle preflight request
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
+  if (req.method === 'OPTIONS') return res.status(200).end(); // Preflight
 
-  // ✅ Only accept POST
   if (req.method !== 'POST') return res.status(405).end();
 
   const { email, fingerprint } = req.body;
@@ -30,7 +21,6 @@ export default async function handler(req, res) {
     return res.status(400).json({ status: 'error', error: 'Missing email or fingerprint' });
   }
 
-  // ✅ 1. Check if already claimed
   const { data: existing, error: fetchError } = await supabase
     .from('claimed_subscriptions')
     .select('*')
@@ -44,7 +34,6 @@ export default async function handler(req, res) {
     return res.json({ status: 'claimed' });
   }
 
-  // ✅ 2. Insert new claim
   const { error } = await supabase.from('claimed_subscriptions').insert([
     {
       email,
