@@ -1,24 +1,25 @@
-import { createClient } from '@supabase/supabase-js';
+const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_ANON_KEY
 );
 
-res.setHeader('Access-Control-Allow-Origin', 'https://puerhcraft.com');
-res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+module.exports = async function handler(req, res) {
+  // Setup CORS
+  res.setHeader('Access-Control-Allow-Origin', 'https://puerhcraft.com');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method === 'OPTIONS') return res.status(200).end();
 
-
-export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
 
   const { device_uuid, user_agent } = req.body;
   const ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || null;
 
-  // Validate inputs
   if (!device_uuid || !ip) {
     return res.status(400).json({
       status: 'error',
@@ -27,7 +28,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1. Check if this UUID + IP has already claimed
     const { data: existing, error: checkError } = await supabase
       .from('claimed_subscriptions')
       .select('*')
@@ -41,20 +41,16 @@ export default async function handler(req, res) {
     }
 
     if (existing) {
-      // Already claimed
       return res.status(200).json({ status: 'claimed' });
     }
 
-    // 2. Insert the new claim
     const insertData = {
       device_uuid,
       ip_address: ip,
       user_agent: user_agent || null,
       claimed_at: new Date(),
-      order_id: null, // order_id will be updated after purchase
+      order_id: null,
     };
-
-    console.log('Inserting claim:', insertData);
 
     const { error: insertError } = await supabase
       .from('claimed_subscriptions')
@@ -70,4 +66,4 @@ export default async function handler(req, res) {
     console.error('Unexpected error:', err.message);
     return res.status(500).json({ status: 'error', error: 'Server error' });
   }
-}
+};
