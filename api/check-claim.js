@@ -6,6 +6,16 @@ const supabase = createClient(
 );
 
 export default async function handler(req, res) {
+  // --- Add CORS headers ---
+  res.setHeader("Access-Control-Allow-Origin", "https://puerhcraft.com");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  // Handle preflight request
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -16,7 +26,6 @@ export default async function handler(req, res) {
     req.socket?.remoteAddress ||
     null;
 
-  // Require at least one identifier
   if (!device_uuid && !ip) {
     return res.status(400).json({
       status: 'error',
@@ -25,7 +34,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Check if a claim already exists with this device_uuid or IP
     const filters = [];
     if (device_uuid) filters.push(`device_uuid.eq.${device_uuid}`);
     if (ip) filters.push(`ip_address.eq.${ip}`);
@@ -48,7 +56,6 @@ export default async function handler(req, res) {
       return res.json({ status: 'claimed' });
     }
 
-    // No existing claim — allow access and insert a claim record
     const { error: insertError } = await supabase
       .from('claimed_subscriptions')
       .insert([
@@ -57,7 +64,7 @@ export default async function handler(req, res) {
           ip_address: ip,
           user_agent: user_agent || null,
           claimed_at: new Date(),
-          order_id: null, // Will be updated by order webhook
+          order_id: null,
         },
       ]);
 
