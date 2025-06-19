@@ -1,4 +1,3 @@
-// pages/api/order-webhook.js
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
@@ -15,26 +14,24 @@ export default async function handler(req, res) {
   try {
     const order = req.body;
 
-    // Check if the order is already recorded based on email or order_id
     const { data: existing } = await supabase
       .from('claimed_subscriptions')
-      .select('id')
-      .or(`email.eq.${order.email},order_id.eq.${order.id}`)
-      .maybeSingle();
+      .select('*')
+      .eq('email', order.email)
+      .single();
 
     if (existing) {
       return res.status(200).json({ message: 'Order already exists' });
     }
 
-    const { error } = await supabase.from('claimed_subscriptions').insert([
-      {
-        email: order.email,
-        ip_address: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
-        user_agent: req.headers['user-agent'],
-        claimed_at: new Date(),
-        order_id: order.id,
-      },
-    ]);
+    const { error } = await supabase.from('claimed_subscriptions').insert([{
+      email: order.email,
+      device_uuid: order.device_uuid || null,
+      ip_address: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+      user_agent: req.headers['user-agent'],
+      claimed_at: new Date(),
+      order_id: order.id,
+    }]);
 
     if (error) {
       console.error('Supabase insert error:', error);
