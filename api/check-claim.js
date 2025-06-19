@@ -21,23 +21,21 @@ export default async function handler(req, res) {
 
   try {
     const { email, fingerprint } = req.body;
-
-    const ip =
-      req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
+    const ip = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
 
     if (!email && !fingerprint && !ip) {
       return res.status(400).json({ status: 'error', error: 'Missing identifiers' });
     }
 
-    // Check if any record exists matching ANY of email, fingerprint, or IP
+    const orFilters = [];
+    if (email) orFilters.push(`email.eq.${email}`);
+    if (fingerprint) orFilters.push(`fingerprint.eq.${fingerprint}`);
+    if (ip) orFilters.push(`ip_address.eq.${ip}`);
+
     const { data: existing, error } = await supabase
       .from('claimed_subscriptions')
       .select('id')
-      .or([
-        email ? `email.eq.${email}` : null,
-        fingerprint ? `fingerprint.eq.${fingerprint}` : null,
-        ip ? `ip_address.eq.${ip}` : null,
-      ].filter(Boolean).join(','));
+      .or(orFilters.join(','));
 
     if (error) {
       return res.status(500).json({ status: 'error', error: error.message });
