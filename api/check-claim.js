@@ -1,3 +1,4 @@
+// /api/check-claim.js
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -13,56 +14,50 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Access-Control-Max-Age', '86400');
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
+  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).end();
 
   try {
     const { email, device_uuid, user_agent } = req.body;
-    const ip_address = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
+    const ip = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
 
-    if (!email && !device_uuid && !ip_address) {
+    if (!email && !device_uuid && !ip) {
       return res.status(400).json({ status: 'error', error: 'Missing identifiers' });
     }
 
-    // Build OR conditions for Supabase query
-    const orFilters = [];
-    if (email) orFilters.push(`email.eq.${email}`);
-    if (device_uuid) orFilters.push(`device_uuid.eq.${device_uuid}`);
-    if (ip_address) orFilters.push(`ip_address.eq.${ip_address}`);
+    const filters = [];
+    if (email) filters.push(`email.eq.${email}`);
+    if (device_uuid) filters.push(`device_uuid.eq.${device_uuid}`);
+    if (ip) filters.push(`ip_address.eq.${ip}`);
 
-    const { data: existing, error } = await supabase
+    const { data: existing, error: fetchError } = await supabase
       .from('claimed_subscriptions')
       .select('id')
-      .or(orFilters.join(','));
+      .or(filters.join(','));
 
-    if (error) {
-      console.error('Supabase query error:', error.message);
-      return res.status(500).json({ status: 'error', error: error.message });
-    }
+    if (fetchError) return res.status(500).json({ status: 'error', error: fetchError.message });
 
     if (existing.length > 0) {
       return res.json({ status: 'claimed' });
     }
 
-    // Optionally, log the pre-check (not required for validation)
-    await supabase.from('claimed_subscriptions').insert([
+    const { error: insertError } = await supabase.from('claimed_subscriptions').insert([
       {
         email,
         device_uuid,
-        ip_address,
+        ip_address: ip,
         user_agent,
         claimed_at: new Date(),
-        order_id: null, // Will be updated later via webhook
       }
     ]);
+
+    if (insertError) {
+      return res.status(500).json({ status: 'error', error: insertError.message });
+    }
 
     return res.json({ status: 'new' });
 
   } catch (err) {
-    console.error('API error:', err.message);
     return res.status(500).json({ status: 'error', error: err.message });
   }
 }
