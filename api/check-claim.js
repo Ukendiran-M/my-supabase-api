@@ -1,4 +1,3 @@
-// /api/check-claim.js
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -6,58 +5,70 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY
 );
 
-const allowedOrigin = 'https://puerhcraft.com';
-
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Max-Age', '86400');
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
 
-  if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).end();
+  const { device_uuid, user_agent } = req.body;
+  const ip =
+    req.headers['x-forwarded-for']?.split(',')[0] ||
+    req.socket?.remoteAddress ||
+    null;
+
+  // Require at least one identifier
+  if (!device_uuid && !ip) {
+    return res.status(400).json({
+      status: 'error',
+      error: 'Missing device_uuid or IP address',
+    });
+  }
 
   try {
-    const { email, device_uuid, user_agent } = req.body;
-    const ip = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
-
-    if (!email && !device_uuid && !ip) {
-      return res.status(400).json({ status: 'error', error: 'Missing identifiers' });
-    }
-
+    // Check if a claim already exists with this device_uuid or IP
     const filters = [];
-    if (email) filters.push(`email.eq.${email}`);
     if (device_uuid) filters.push(`device_uuid.eq.${device_uuid}`);
     if (ip) filters.push(`ip_address.eq.${ip}`);
 
-    const { data: existing, error: fetchError } = await supabase
-      .from('claimed_subscriptions')
-      .select('id')
-      .or(filters.join(','));
+    let existing = [];
+    if (filters.length > 0) {
+      const { data, error } = await supabase
+        .from('claimed_subscriptions')
+        .select('id')
+        .or(filters.join(','));
 
-    if (fetchError) return res.status(500).json({ status: 'error', error: fetchError.message });
+      if (error) {
+        console.error('Supabase SELECT error:', error.message);
+        return res.status(500).json({ status: 'error', error: 'DB read failed' });
+      }
+      existing = data;
+    }
 
     if (existing.length > 0) {
       return res.json({ status: 'claimed' });
     }
 
-    const { error: insertError } = await supabase.from('claimed_subscriptions').insert([
-      {
-        email,
-        device_uuid,
-        ip_address: ip,
-        user_agent,
-        claimed_at: new Date(),
-      }
-    ]);
+    // No existing claim — allow access and insert a claim record
+    const { error: insertError } = await supabase
+      .from('claimed_subscriptions')
+      .insert([
+        {
+          device_uuid: device_uuid || null,
+          ip_address: ip,
+          user_agent: user_agent || null,
+          claimed_at: new Date(),
+          order_id: null, // Will be updated by order webhook
+        },
+      ]);
 
     if (insertError) {
-      return res.status(500).json({ status: 'error', error: insertError.message });
+      console.error('Supabase INSERT error:', insertError.message);
+      return res.status(500).json({ status: 'error', error: 'DB insert failed' });
     }
 
     return res.json({ status: 'new' });
-
   } catch (err) {
-    return res.status(500).json({ status: 'error', error: err.message });
+    console.error('Unexpected error:', err.message);
+    return res.status(500).json({ status: 'error', error: 'Server error' });
   }
 }
