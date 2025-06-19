@@ -6,6 +6,16 @@ const supabase = createClient(
 );
 
 export default async function handler(req, res) {
+  // ✅ Set CORS headers
+  res.setHeader("Access-Control-Allow-Origin", "https://puerhcraft.com");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  // ✅ Handle preflight OPTIONS request
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
   if (req.method !== 'POST') return res.status(405).end();
 
   try {
@@ -16,7 +26,6 @@ export default async function handler(req, res) {
       return res.status(400).json({ status: 'error', error: 'Missing device_uuid or IP' });
     }
 
-    // Check if this device or IP has already claimed
     const { data: existing, error: checkError } = await supabase
       .from('claimed_subscriptions')
       .select('id')
@@ -32,14 +41,13 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'claimed' });
     }
 
-    // Insert new claim record
     const { error: insertError } = await supabase.from('claimed_subscriptions').insert([
       {
         device_uuid,
         ip_address: ip,
         user_agent: user_agent || null,
         claimed_at: new Date(),
-        order_id: null // no order yet
+        order_id: null
       }
     ]);
 
