@@ -1,15 +1,12 @@
-// pages/api/order-webhook.js
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
-
-// Optional: Set a shared secret to verify manually
-const BASIC_SECRET = process.env.WEBHOOK_SHARED_SECRET; // Set this in Vercel
+const BASIC_SECRET = process.env.WEBHOOK_SHARED_SECRET;
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const incomingSecret = req.headers['x-shopify-topic-secret']; // Custom header you control
+  const incomingSecret = req.headers['x-shopify-topic-secret'];
   if (BASIC_SECRET && incomingSecret !== BASIC_SECRET) {
     return res.status(401).json({ message: 'Unauthorized: Invalid Secret' });
   }
@@ -17,25 +14,24 @@ export default async function handler(req, res) {
   try {
     const order = req.body;
 
-    // Check if order already exists (use Shopify order ID or email)
-    const existing = await supabase
+    const { data: existing } = await supabase
       .from('claimed_subscriptions')
       .select('*')
       .eq('email', order.email)
       .single();
 
-    if (existing.data) {
+    if (existing) {
       return res.status(200).json({ message: 'Order already exists' });
     }
 
-    // Insert new order into Supabase
     const { error } = await supabase.from('claimed_subscriptions').insert([
       {
         email: order.email,
-        fingerprint: 'basic', // placeholder if you don’t collect this
+        fingerprint: 'basic',
         ip_address: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
         user_agent: req.headers['user-agent'],
         claimed_at: new Date(),
+        order_id: order.id,
       },
     ]);
 

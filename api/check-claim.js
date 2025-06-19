@@ -13,24 +13,24 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Access-Control-Max-Age', '86400');
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
+  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).end();
 
   try {
-    const { email, fingerprint } = req.body;
-    const ip = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
+    const { email, device_uuid } = req.body;
+    const ip =
+      req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
+    const userAgent = req.headers['user-agent'];
 
-    if (!email && !fingerprint && !ip) {
+    if (!email && !device_uuid && !ip) {
       return res.status(400).json({ status: 'error', error: 'Missing identifiers' });
     }
 
     const orFilters = [];
     if (email) orFilters.push(`email.eq.${email}`);
-    if (fingerprint) orFilters.push(`fingerprint.eq.${fingerprint}`);
+    if (device_uuid) orFilters.push(`device_uuid.eq.${device_uuid}`);
     if (ip) orFilters.push(`ip_address.eq.${ip}`);
+    if (userAgent) orFilters.push(`user_agent.eq.${userAgent}`);
 
     const { data: existing, error } = await supabase
       .from('claimed_subscriptions')
@@ -46,7 +46,6 @@ export default async function handler(req, res) {
     } else {
       return res.json({ status: 'new' });
     }
-
   } catch (err) {
     return res.status(500).json({ status: 'error', error: err.message });
   }
