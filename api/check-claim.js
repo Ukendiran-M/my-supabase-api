@@ -15,22 +15,27 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { device_uuid, user_agent } = req.body;
+  const { device_uuid, cookie_id, fingerprint, user_agent } = req.body;
   const ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || null;
 
-  if (!device_uuid || !ip) {
-    return res.status(400).json({
-      status: 'error',
-      error: 'Missing device_uuid or IP address',
-    });
+  if (!ip) {
+    return res.status(400).json({ status: 'error', error: 'Missing IP address' });
   }
 
   try {
-    // Check if either device_uuid or IP already made a purchase (i.e., has a non-null order_id)
+    // Build dynamic OR conditions
+    const filters = [];
+    if (device_uuid) filters.push(`device_uuid.eq.${device_uuid}`);
+    if (cookie_id) filters.push(`cookie_id.eq.${cookie_id}`);
+    if (fingerprint) filters.push(`fingerprint.eq.${fingerprint}`);
+    filters.push(`ip_address.eq.${ip}`); // Always check IP
+
+    const filterExpression = filters.join(',');
+
     const { data: existing, error } = await supabase
       .from('claimed_subscriptions')
       .select('order_id')
-      .or(`device_uuid.eq.${device_uuid},ip_address.eq.${ip}`)
+      .or(filterExpression)
       .order('claimed_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -40,12 +45,10 @@ module.exports = async function handler(req, res) {
       return res.status(500).json({ status: 'error', error: 'Database read failed' });
     }
 
-    // If there's a match with a non-null order_id, treat it as claimed
     if (existing && existing.order_id !== null) {
       return res.status(200).json({ status: 'claimed' });
     }
 
-    // No valid prior purchase — allow access
     return res.status(200).json({ status: 'new' });
 
   } catch (err) {

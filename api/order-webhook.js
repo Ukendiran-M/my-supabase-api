@@ -16,22 +16,30 @@ export default async function handler(req, res) {
   try {
     const order = req.body;
 
-    // Step 1: Extract email safely
+    // Step 1: Extract email
     const email = order.email || null;
     if (!email) {
       return res.status(400).json({ message: 'Missing order email' });
     }
 
-    // Step 2: Extract device_uuid from note_attributes
+    // Step 2: Extract identifiers from note_attributes
     let device_uuid = null;
+    let cookie_id = null;
+    let fingerprint = null;
+
     if (Array.isArray(order.note_attributes)) {
-      const attr = order.note_attributes.find(attr => attr.name === 'device_uuid');
-      if (attr && typeof attr.value === 'string') {
-        device_uuid = attr.value;
+      for (const attr of order.note_attributes) {
+        if (attr.name === 'device_uuid') {
+          device_uuid = attr.value;
+        } else if (attr.name === 'cookie_id') {
+          cookie_id = attr.value;
+        } else if (attr.name === 'fingerprint') {
+          fingerprint = attr.value;
+        }
       }
     }
 
-    // Step 3: Check if this email already claimed
+    // Step 3: Check if this email already exists in DB
     const { data: existing, error: lookupError } = await supabase
       .from('claimed_subscriptions')
       .select('id')
@@ -47,10 +55,12 @@ export default async function handler(req, res) {
       return res.status(200).json({ message: 'Order already exists' });
     }
 
-    // Step 4: Insert claim into Supabase
+    // Step 4: Insert new claim
     const { error: insertError } = await supabase.from('claimed_subscriptions').insert([{
       email,
       device_uuid,
+      cookie_id,
+      fingerprint,
       ip_address: req.headers['x-forwarded-for'] || req.socket.remoteAddress || null,
       user_agent: req.headers['user-agent'] || null,
       claimed_at: new Date().toISOString(),
