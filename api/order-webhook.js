@@ -14,6 +14,16 @@ export default async function handler(req, res) {
   try {
     const order = req.body;
 
+    // Safely extract device_uuid from note_attributes
+    let device_uuid = null;
+    if (Array.isArray(order.note_attributes)) {
+      const uuidAttr = order.note_attributes.find(attr => attr.name === 'device_uuid');
+      if (uuidAttr) {
+        device_uuid = uuidAttr.value || null;
+      }
+    }
+
+    // Check if the email already exists
     const { data: existing } = await supabase
       .from('claimed_subscriptions')
       .select('*')
@@ -24,9 +34,10 @@ export default async function handler(req, res) {
       return res.status(200).json({ message: 'Order already exists' });
     }
 
+    // Insert new record
     const { error } = await supabase.from('claimed_subscriptions').insert([{
       email: order.email,
-      device_uuid: order.device_uuid || null,
+      device_uuid,
       ip_address: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
       user_agent: req.headers['user-agent'],
       claimed_at: new Date(),
