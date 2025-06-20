@@ -6,20 +6,26 @@ const supabase = createClient(
 );
 
 module.exports = async function handler(req, res) {
-  // Setup CORS
+  // ✅ CORS headers
   res.setHeader('Access-Control-Allow-Origin', 'https://puerhcraft.com');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
+  // ✅ Preflight request
   if (req.method === 'OPTIONS') return res.status(200).end();
 
+  // ❌ Allow only POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   const { device_uuid, user_agent } = req.body;
-  const ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || null;
+  const ip =
+    req.headers['x-forwarded-for']?.split(',')[0].trim() ||
+    req.socket?.remoteAddress ||
+    null;
 
+  // ❌ Check required fields
   if (!device_uuid || !ip) {
     return res.status(400).json({
       status: 'error',
@@ -28,9 +34,10 @@ module.exports = async function handler(req, res) {
   }
 
   try {
+    // 🔍 Check if this UUID + IP combo already exists
     const { data: existing, error: checkError } = await supabase
       .from('claimed_subscriptions')
-      .select('*')
+      .select('id')
       .eq('device_uuid', device_uuid)
       .eq('ip_address', ip)
       .maybeSingle();
@@ -44,17 +51,18 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ status: 'claimed' });
     }
 
-    const insertData = {
-      device_uuid,
-      ip_address: ip,
-      user_agent: user_agent || null,
-      claimed_at: new Date(),
-      order_id: null,
-    };
-
+    // ✅ First-time claim — insert entry with order_id = null
     const { error: insertError } = await supabase
       .from('claimed_subscriptions')
-      .insert([insertData]);
+      .insert([
+        {
+          device_uuid,
+          ip_address: ip,
+          user_agent: user_agent || null,
+          claimed_at: new Date().toISOString(),
+          order_id: null,
+        },
+      ]);
 
     if (insertError) {
       console.error('Supabase INSERT error:', insertError.message);
