@@ -4,7 +4,9 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANO
 const BASIC_SECRET = process.env.WEBHOOK_SHARED_SECRET;
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).end();
+  if (req.method !== 'POST') {
+    return res.status(405).json({ message: 'Method Not Allowed' });
+  }
 
   const incomingSecret = req.headers['x-shopify-topic-secret'];
   if (BASIC_SECRET && incomingSecret !== BASIC_SECRET) {
@@ -14,44 +16,56 @@ export default async function handler(req, res) {
   try {
     const order = req.body;
 
-    // Safely extract device_uuid from note_attributes
+    // Step 1: Extract email safely
+    const email = order.email || null;
+    if (!email) {
+      return res.status(400).json({ message: 'Missing order email' });
+    }
+
+    // Step 2: Extract device_uuid from note_attributes
     let device_uuid = null;
     if (Array.isArray(order.note_attributes)) {
-      const uuidAttr = order.note_attributes.find(attr => attr.name === 'device_uuid');
-      if (uuidAttr) {
-        device_uuid = uuidAttr.value || null;
+      const attr = order.note_attributes.find(attr => attr.name === 'device_uuid');
+      if (attr && typeof attr.value === 'string') {
+        device_uuid = attr.value;
       }
     }
 
-    // Check if the email already exists
-    const { data: existing } = await supabase
+    // Step 3: Check if this email already claimed
+    const { data: existing, error: lookupError } = await supabase
       .from('claimed_subscriptions')
-      .select('*')
-      .eq('email', order.email)
-      .single();
+      .select('id')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (lookupError) {
+      console.error('Supabase lookup error:', lookupError);
+      return res.status(500).json({ message: 'Database lookup error' });
+    }
 
     if (existing) {
       return res.status(200).json({ message: 'Order already exists' });
     }
 
-    // Insert new record
-    const { error } = await supabase.from('claimed_subscriptions').insert([{
-      email: order.email,
+    // Step 4: Insert claim into Supabase
+    const { error: insertError } = await supabase.from('claimed_subscriptions').insert([{
+      email,
       device_uuid,
-      ip_address: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
-      user_agent: req.headers['user-agent'],
-      claimed_at: new Date(),
-      order_id: order.id,
+      ip_address: req.headers['x-forwarded-for'] || req.socket.remoteAddress || null,
+      user_agent: req.headers['user-agent'] || null,
+      claimed_at: new Date().toISOString(),
+      order_id: order.id || null
     }]);
 
-    if (error) {
-      console.error('Supabase insert error:', error);
+    if (insertError) {
+      console.error('Supabase insert error:', insertError);
       return res.status(500).json({ message: 'Insert failed' });
     }
 
-    return res.status(200).json({ message: 'Order saved' });
+    return res.status(200).json({ message: 'Order saved successfully' });
+
   } catch (err) {
-    console.error('Webhook error:', err.message);
-    return res.status(500).json({ message: 'Server error' });
+    console.error('Webhook handler error:', err);
+    return res.status(500).json({ message: 'Unexpected server error' });
   }
 }
